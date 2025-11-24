@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>短期記憶ゲーム（完全版）</title>
+<style>
+body { font-family: 'Arial', sans-serif; text-align: center; margin: 10px auto; max-width: 480px; padding: 10px; background: #fafafa; color: #333; position: relative; }
+h1 { font-size: 6vw; margin-bottom: 8px; color: #2196F3; }
+#levelInfo, #questionInfo, #timer, #remainingInfo { font-size: 4vw; margin-top: 6px; }
+#timer { color: #F44336; font-weight: bold; min-height: 30px; }
+.sequence-container { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 10px; min-height: 70px; }
+.circle { width: 14vw; max-width: 60px; height: 14vw; max-height: 60px; border-radius: 50%; background: linear-gradient(135deg, #f0f0f0, #dcdcdc); display: flex; align-items: center; justify-content: center; font-size: 6vw; font-weight: bold; color: #333; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+.answer-container { display: flex; justify-content: center; align-items: flex-start; gap: 15px; margin-top: 10px; }
+.answer-sequence span.correct { color: #2196F3; font-weight: bold; }
+.answer-sequence span.wrong { color: #F44336; font-weight: bold; }
+.result-info { font-size: 0.8em; text-align: left; min-width: 120px; }
+.result-status { font-weight: bold; color: #fff; background-color: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px; display: inline-block; margin-bottom: 6px; }
+.btn-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 300px; margin: 15px auto; padding: 10px; }
+.num-btn, .action-btn, .skip-btn { width: 100%; padding: 12px; font-size: 6vw; background: linear-gradient(135deg, #f9f9f9, #e0e0e0); border: none; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
+.action-btn { background-color: #FF9800; color: #fff; font-weight: bold; }
+.skip-btn { background-color: #F44336; color: #fff; font-weight: bold; }
+#scoreDisplay { font-size: 4vw; margin-top: 15px; font-weight: bold; display: none; }
+#countdownDisplay {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  font-size: 1em;
+  color: #FF9800;
+  font-weight: bold;
+  background: rgba(255,255,255,0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+@media (min-width: 768px) {
+  h1 { font-size: 1.8em; }
+  #levelInfo, #questionInfo, #timer, #remainingInfo { font-size: 1em; }
+  .circle { width: 50px; height: 50px; font-size: 1.4em; }
+  .num-btn, .action-btn, .skip-btn { font-size: 1.2em; padding: 14px; }
+}
+</style>
+</head>
+<body>
+<h1>短期記憶ゲーム</h1>
+<p id="gameIntro">各レベル2問、全レベル終了後に脳年齢とIQを判定します。</p>
+
+<button id="startBtn">スタート</button>
+<button id="restartBtn" style="display:none;">もう一度プレイ</button>
+<div id="levelInfo"></div>
+<div id="questionInfo"></div>
+<div id="remainingInfo"></div>
+<div id="timer">残り時間: 5秒</div>
+<div class="sequence-container" id="sequenceDisplay"></div>
+
+<div class="answer-container">
+  <div class="answer-block">
+    <div id="userInputDisplay" class="answer-sequence"></div>
+    <div id="correctAnswer" class="answer-sequence"></div>
+  </div>
+  <div class="result-info">
+    <div id="result" class="result-status" style="display:none;"></div>
+    <div id="questionStats" class="stats-inline"></div>
+  </div>
+</div>
+
+<div class="btn-container" id="buttons">
+  <button class="num-btn">1</button>
+  <button class="num-btn">2</button>
+  <button class="num-btn">3</button>
+  <button class="num-btn">4</button>
+  <button class="num-btn">5</button>
+  <button class="num-btn">6</button>
+  <button class="num-btn">7</button>
+  <button class="num-btn">8</button>
+  <button class="num-btn">9</button>
+  <button class="num-btn">0</button>
+  <button class="action-btn">戻る</button>
+  <button class="skip-btn">分からない</button>
+</div>
+
+<div id="scoreDisplay"></div>
+<div id="countdownDisplay"></div>
+
+<script>
+const soundShow = new Audio("show.mp3");
+const soundClick = new Audio("click.mp3");
+const soundCorrect = new Audio("correct.mp3");
+const soundWrong = new Audio("wrong.mp3");
+const soundLevelUp = new Audio("levelup.mp3");
+const soundGameOver = new Audio("gameover.mp3");
+const soundCountdown = new Audio("countdown.mp3");
+
+function playSound(audio) {
+  const clone = audio.cloneNode(true);
+  clone.volume = 0.8;
+  clone.play();
+}
+
+let sequence = [], userInput = [], displayTime = 1.0, sequenceLength = 3;
+let level = 1, questionCount = 0;
+const questionsPerLevel = 2, totalLevels = 5;
+const totalQuestions = questionsPerLevel * totalLevels;
+let correctInputs = 0, totalInputs = 0, totalTime = 0, timeRecords = [];
+let timerInterval, timeLeft, startTime;
+let allResults = [];
+
+function setLevel() {
+  switch(level){
+    case 1: sequenceLength=3; displayTime=1.0; break;
+    case 2: sequenceLength=4; displayTime=0.9; break;
+    case 3: sequenceLength=5; displayTime=0.8; break;
+    case 4: sequenceLength=6; displayTime=0.8; break;
+    case 5: sequenceLength=7; displayTime=0.6; break;
+  }
+  document.getElementById('levelInfo').textContent=`レベル ${level}`;
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timeLeft = (level >= 4) ? 7 : 5;
+  document.getElementById('timer').textContent=`残り時間: ${timeLeft}秒`;
+  timerInterval=setInterval(()=>{
+    if(timeLeft>0){
+      timeLeft--;
+      document.getElementById('timer').textContent=`残り時間: ${timeLeft}秒`;
+    } else {
+      clearInterval(timerInterval);
+      autoFail();
+    }
+  },1000);
+}
+
+function autoFail() {
+  playSound(soundWrong);
+  showResult('時間切れ！','#F44336');
+  recordResult(0,'-');
+  questionCount++;
+  resetGame();
+}
+
+function generateSequence() {
+  sequence=[];
+  for(let i=0;i<sequenceLength;i++) sequence.push(Math.floor(Math.random()*10));
+}
+
+function createCircles() {
+  const container=document.getElementById('sequenceDisplay');
+  container.innerHTML='';
+  for(let i=0;i<sequenceLength;i++){
+    const circle=document.createElement('div');
+    circle.className='circle';
+    circle.textContent='〇';
+    container.appendChild(circle);
+  }
+}
+
+function showSequence() {
+  const circles=document.querySelectorAll('.circle');
+  let i=0;
+  const interval=setInterval(()=>{
+    if(i>0) circles[i-1].textContent='〇';
+    circles[i].textContent=sequence[i];
+    playSound(soundShow);
+    i++;
+    if(i>=sequence.length){
+      clearInterval(interval);
+      setTimeout(()=>{
+        circles[sequence.length-1].textContent='〇';
+        enableButtons();
+        startTimer();
+        startTime=Date.now();
+      }, displayTime*1000);
+    }
+  }, displayTime*1000);
+}
+
+function enableButtons() { document.querySelectorAll('.num-btn, .action-btn, .skip-btn').forEach(b=>b.disabled=false); }
+function disableButtons() { document.querySelectorAll('.num-btn, .action-btn, .skip-btn').forEach(b=>b.disabled=true); }
+
+document.querySelectorAll('.num-btn').forEach(btn=>btn.addEventListener('click',()=>{playSound(soundClick);handleClick(parseInt(btn.textContent));}));
+document.querySelector('.action-btn').addEventListener('click',()=>{playSound(soundClick);userInput.pop();updateInputDisplay();});
+document.querySelector('.skip-btn').addEventListener('click',()=>{playSound(soundClick);clearInterval(timerInterval);userInput=[];checkResult(true);});
+
+function updateInputDisplay() { document.getElementById('userInputDisplay').innerHTML=userInput.map(n=>`<span>${n}</span>`).join(''); }
+
+function handleClick(num){
+  if(userInput.length<sequenceLength){
+    userInput.push(num);
+    updateInputDisplay();
+    if(userInput.length===sequenceLength){
+      clearInterval(timerInterval);
+      checkResult();
+    }
+  }
+}
+
+function checkResult(skipped=false){
+  let elapsed=(Date.now()-startTime)/1000;
+  totalTime+=elapsed;
+  timeRecords.push(elapsed);
+  totalInputs+=sequence.length;
+  let correctCount=skipped?0:sequence.filter((n,i)=>n===userInput[i]).length;
+  correctInputs+=correctCount;
+
+  const questionAccuracy=correctCount/sequence.length;
+  const avgSpeedPerDigit=skipped?'-':(elapsed/sequence.length).toFixed(2);
+
+  document.getElementById('questionStats').innerHTML=`<p>正答率: ${(questionAccuracy*100).toFixed(1)}% 入力速度: ${avgSpeedPerDigit}秒/桁</p>`;
+
+  let userHTML='', correctHTML='';
+  for(let i=0;i<sequence.length;i++){
+    if(!skipped) userHTML+=`<span class="${userInput[i]===sequence[i]?'correct':'wrong'}">${userInput[i]}</span>`;
+    correctHTML+=`<span>${sequence[i]}</span>`;
+  }
+  document.getElementById('userInputDisplay').innerHTML=userHTML;
+  document.getElementById('correctAnswer').innerHTML=correctHTML;
+
+  const isCorrect=!skipped && userInput.every((n,i)=>n===sequence[i]);
+  showResult(isCorrect?'正解':'不正解',isCorrect?'#2196F3':'#F44336');
+  playSound(isCorrect?soundCorrect:soundWrong);
+
+  recordResult(questionAccuracy,avgSpeedPerDigit);
+  disableButtons();
+  questionCount++;
+  resetGame();
+}
+
+function recordResult(acc,speed){allResults.push({level,question:questionCount,accuracy:acc,speed});}
+function showResult(txt,color){const r=document.getElementById('result');r.textContent=txt;r.style.backgroundColor=color;r.style.display='block';}
+
+function startCountdown(nextAction){
+  let count=3;
+  const div=document.getElementById('countdownDisplay');
+  playSound(soundCountdown);
+  div.textContent=`次の問題まで ${count} 秒`;
+  const interval=setInterval(()=>{
+    count--;
+    if(count>=0) div.textContent=`次の問題まで ${count} 秒`;
+    else { clearInterval(interval); div.textContent=''; nextAction(); }
+  },1000);
+}
+
+function resetGame(){
+  setTimeout(()=>{
+    userInput=[];
+    document.getElementById('userInputDisplay').innerHTML='';
+    document.getElementById('correctAnswer').innerHTML='';
+    document.getElementById('timer').textContent='残り時間: 5秒';
+    document.getElementById('result').style.display='none';
+    document.getElementById('questionStats').innerHTML='';
+
+    const remaining=questionsPerLevel-questionCount;
+    if(remaining>0) startCountdown(startQuestion);
+    else nextLevel();
+  },2000);
+}
+
+function startQuestion(){
+  const remaining=totalQuestions-((level-1)*questionsPerLevel+questionCount);
+  document.getElementById('questionInfo').textContent=`レベル ${level} - 第 ${questionCount+1} 問`;
+  document.getElementById('remainingInfo').textContent=`残り ${remaining} 問`;
+  generateSequence();
+  createCircles();
+  showSequence();
+}
+
+function nextLevel(){
+  if(level<totalLevels){
+    level++;
+    questionCount=0;
+    setLevel();           // sequenceLength更新
+    playSound(soundLevelUp);
+    createCircles();      // レベルアップ時に〇の数更新
+    startCountdown(startQuestion);
+  } else showFinalResult();
+}
+
+function calcConsistency(times){const avg=times.reduce((a,b)=>a+b,0)/times.length;return Math.sqrt(times.reduce((a,b)=>a+Math.pow(b-avg,2),0)/times.length);}
+function calculateBrainAge(ci,ti,avgT,cons,l){const a=ci/ti;const s=avgT>1?(avgT-1)*10:0;const c=cons>0.5?(cons-0.5)*10:0;return Math.max(18,Math.round(55-(a*30)+s+c));}
+function calculateIQ(ci,ti,avgT,cons,l){const a=ci/ti;const s=avgT>1?(avgT-1)*15:0;const c=cons>0.5?(cons-0.5)*15:0;return Math.max(50,Math.round(95+(a*25)-s-c));}
+
+function showFinalResult(){
+  playSound(soundGameOver);
+  const accuracy=correctInputs/totalInputs;
+  const avgTime=totalTime/totalInputs;
+  const consistency=calcConsistency(timeRecords);
+  const brainAge=calculateBrainAge(correctInputs,totalInputs,avgTime,consistency,level);
+  const iqScore=calculateIQ(correctInputs,totalInputs,avgTime,consistency,level);
+  document.body.innerHTML=`
+    <h1>結果</h1>
+    <h2>脳年齢: ${brainAge}歳 | IQ: ${iqScore}</h2>
+    <p>正答率: ${(accuracy*100).toFixed(1)}%</p>
+    <p>平均入力速度: ${avgTime.toFixed(2)}秒</p>
+    <p>集中力スコア(標準偏差): ${consistency.toFixed(2)}秒</p>
+    <h3>詳細結果</h3>
+    <table border="1" style="margin:auto;">
+      <tr><th>レベル</th><th>問</th><th>正答率</th><th>入力速度</th></tr>
+      ${allResults.map(r=>`<tr><td>${r.level}</td><td>${r.question}</td><td>${(r.accuracy*100).toFixed(1)}%</td><td>${r.speed}</td></tr>`).join('')}
+    </table>
+    <button onclick="location.reload()">もう一度プレイ</button>
+  `;
+}
+
+function startGame(){
+  level=1; questionCount=0; correctInputs=0; totalInputs=0; totalTime=0; timeRecords=[]; allResults=[];
+  document.getElementById('scoreDisplay').style.display='none';
+  document.getElementById('restartBtn').style.display='none';
+  document.getElementById('gameIntro').textContent=`このゲームはレベル${totalLevels}まであり、全部で${totalQuestions}問あります。`;
+  setLevel();
+  document.getElementById('startBtn').disabled=true;
+  startCountdown(startQuestion);
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+</script>
+</body>
+</html>
